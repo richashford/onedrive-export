@@ -202,13 +202,24 @@ function Get-NextBatch {
         [int]$Limit = 32
     )
     $now = (Get-Date).ToUniversalTime().ToString('o')
+    # Due retries FIRST: a combined OR query satisfies its LIMIT from the (huge)
+    # queued pool and starves retry_wait rows for the entire run. The retry set
+    # is always small, so this extra query is cheap.
     $rows = @(Invoke-Db -Conn $Conn -Query @'
 SELECT id, rel_path, local_path, size, etag, attempts, status
 FROM items
-WHERE is_folder = 0
-  AND (status = 'queued' OR (status = 'retry_wait' AND next_retry_at <= @now))
+WHERE is_folder = 0 AND status = 'retry_wait' AND next_retry_at <= @now
 LIMIT @lim
 '@ -Params @{ now = $now; lim = $Limit })
+
+    if ($rows.Count -lt $Limit) {
+        $rows += @(Invoke-Db -Conn $Conn -Query @'
+SELECT id, rel_path, local_path, size, etag, attempts, status
+FROM items
+WHERE is_folder = 0 AND status = 'queued'
+LIMIT @lim
+'@ -Params @{ lim = ($Limit - $rows.Count) })
+    }
 
     if ($rows.Count -eq 0) { return @() }
 

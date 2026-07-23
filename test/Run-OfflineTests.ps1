@@ -86,6 +86,14 @@ Assert ((Invoke-Db -Conn $conn -Query "SELECT status FROM items WHERE id='f1'").
 Save-DiscoveryPage -Conn $conn -Rows @(,@{ id='f1'; parent_id='root'; name='a.txt'; rel_path='a.txt'; is_folder=0; size=150; last_modified=$null; created=$null; etag='e1-NEW'; ctag='c1'; quickxor='q1'; status='queued'; local_path='X:\a.txt'; error=$null })
 Assert ((Invoke-Db -Conn $conn -Query "SELECT status FROM items WHERE id='f1'").status -eq 'queued') 'changed etag re-queues'
 
+# retry starvation: a DUE retry_wait row must be dispatched before queued rows
+# even when the queued pool is large enough to fill the batch limit on its own
+Invoke-Db -Conn $conn -Query "UPDATE items SET status='retry_wait', next_retry_at='2000-01-01T00:00:00.0000000Z' WHERE id='f2'" | Out-Null
+$one = @(Get-NextBatch -Conn $conn -Limit 1)
+Assert ($one.Count -eq 1 -and $one[0].id -eq 'f2') 'due retry dispatched before queued backlog' "got $($one[0].id)"
+Reset-StaleStatus -Conn $conn
+Invoke-Db -Conn $conn -Query "UPDATE items SET status='queued', next_retry_at=NULL WHERE id='f2'" | Out-Null
+
 # filter change: a previously skipped row must be re-queued when re-discovered
 # as queued (same etag) - e.g. include/exclude changed followed by -FullRescan
 Invoke-Db -Conn $conn -Query "UPDATE items SET status='skipped', error='excluded by include/exclude pattern' WHERE id='f1'" | Out-Null

@@ -257,6 +257,12 @@ README's schtasks example includes it).
    `Write-ExportSummary`). Regression-covered by the integration suite's
    concurrent-hammer test. *Rule: never enumerate a `$Shared` collection
    directly — always `Get-SyncSnapshot` first.*
+8. **Retry starvation** (observed live 2026-07-23: two 503'd files sat in
+   `retry_wait` 5+ hours past their due time): `Get-NextBatch`'s combined
+   `queued OR retry_wait-due` query satisfied its LIMIT entirely from the
+   ~850k-row queued pool, so due retries were never selected until the queue
+   drained. Fix: query due `retry_wait` rows first, then top up with `queued`.
+   Unit-tested (due retry beats queued backlog at LIMIT 1).
 
 ## Testing
 
