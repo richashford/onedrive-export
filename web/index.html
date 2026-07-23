@@ -1,0 +1,507 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OneDrive Export</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --page:       #0d0d0d;
+    --surface:    #1a1a19;
+    --ink:        #ffffff;
+    --ink-2:      #c3c2b7;
+    --muted:      #898781;
+    --grid:       #2c2c2a;
+    --baseline:   #383835;
+    --border:     rgba(255,255,255,0.10);
+    --s-blue:     #3987e5;   /* throughput series */
+    --s-aqua:     #199e70;   /* completed series */
+    --s-red:      #e66767;   /* failures series */
+    --good:       #0ca30c;
+    --warning:    #fab219;
+    --critical:   #d03b3b;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--page); color: var(--ink);
+    font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  header {
+    display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+    padding: 14px 20px; border-bottom: 1px solid var(--border);
+  }
+  header h1 { font-size: 16px; margin: 0; font-weight: 600; }
+  header .sub { color: var(--muted); font-size: 12px; }
+  .phase-pill {
+    padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600;
+    background: var(--surface); border: 1px solid var(--border); color: var(--ink-2);
+  }
+  .phase-pill.paused   { color: var(--warning); }
+  .phase-pill.running  { color: var(--good); }
+  .phase-pill.complete { color: var(--good); border-color: var(--good); }
+  .spacer { flex: 1; }
+  button.ctl {
+    background: var(--surface); color: var(--ink); border: 1px solid var(--border);
+    padding: 6px 14px; border-radius: 6px; cursor: pointer; font: inherit; font-size: 13px;
+  }
+  button.ctl:hover { border-color: var(--muted); }
+  button.ctl.danger:hover { border-color: var(--critical); color: var(--critical); }
+
+  nav { display: flex; gap: 2px; padding: 0 20px; border-bottom: 1px solid var(--border); }
+  nav a {
+    padding: 10px 14px; color: var(--muted); text-decoration: none; font-size: 13px;
+    border-bottom: 2px solid transparent; cursor: pointer;
+  }
+  nav a.active { color: var(--ink); border-bottom-color: var(--s-blue); }
+  nav a:hover { color: var(--ink-2); }
+
+  main { padding: 20px; max-width: 1280px; margin: 0 auto; }
+  .tab { display: none; }
+  .tab.active { display: block; }
+
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin-bottom: 20px; }
+  .tile {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px;
+  }
+  .tile .k { color: var(--muted); font-size: 12px; margin-bottom: 4px; }
+  .tile .v { font-size: 22px; font-weight: 600; }
+  .tile .d { color: var(--ink-2); font-size: 12px; margin-top: 2px; }
+  .tile .v.bad { color: var(--s-red); }
+
+  .progress-wrap { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px; margin-bottom: 20px; }
+  .bar-outer { height: 10px; background: var(--baseline); border-radius: 5px; overflow: hidden; margin-top: 8px; }
+  .bar-inner { height: 100%; background: var(--s-blue); border-radius: 5px; width: 0%; transition: width .5s; }
+  .bar-label { display: flex; justify-content: space-between; color: var(--ink-2); font-size: 12px; }
+
+  .charts { display: grid; grid-template-columns: 1fr; gap: 16px; }
+  @media (min-width: 900px) { .charts { grid-template-columns: 1fr 1fr; } .charts .wide { grid-column: 1 / -1; } }
+  .chart-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
+  .chart-card h3 { margin: 0 0 2px; font-size: 13px; font-weight: 600; }
+  .chart-card .sub { color: var(--muted); font-size: 11px; margin-bottom: 8px; }
+  .chart-card canvas { width: 100%; height: 180px; display: block; cursor: crosshair; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; color: var(--muted); font-weight: 500; padding: 8px 10px; border-bottom: 1px solid var(--grid); }
+  td { padding: 7px 10px; border-bottom: 1px solid var(--grid); vertical-align: top; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .mono { font-family: Consolas, monospace; font-size: 12px; color: var(--ink-2); word-break: break-all; }
+  .status-chip { font-size: 11px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border); color: var(--ink-2); white-space: nowrap; }
+  .status-chip.err { color: var(--s-red); }
+  .status-chip.wait { color: var(--warning); }
+
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+  .card h3 { margin: 0 0 10px; font-size: 13px; }
+  pre#logbox {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    padding: 14px; font: 12px/1.5 Consolas, monospace; color: var(--ink-2);
+    max-height: 70vh; overflow: auto; white-space: pre-wrap; word-break: break-all;
+  }
+  .kv td:first-child { color: var(--muted); width: 220px; }
+  .banner {
+    display: none; margin-bottom: 16px; padding: 10px 14px; border-radius: 8px;
+    border: 1px solid var(--warning); color: var(--warning); font-size: 13px;
+  }
+  .banner.ok { border-color: var(--good); color: var(--good); }
+  .worker-bar { height: 6px; background: var(--baseline); border-radius: 3px; overflow: hidden; min-width: 120px; }
+  .worker-bar i { display: block; height: 100%; background: var(--s-aqua); }
+  #tooltip {
+    position: fixed; display: none; pointer-events: none; z-index: 10;
+    background: var(--page); border: 1px solid var(--border); border-radius: 8px;
+    padding: 8px 10px; font-size: 12px; color: var(--ink-2); box-shadow: 0 4px 16px rgba(0,0,0,.5);
+  }
+  #tooltip b { color: var(--ink); font-variant-numeric: tabular-nums; }
+  footer { color: var(--muted); font-size: 11px; text-align: center; padding: 16px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>OneDrive Export</h1>
+  <span class="phase-pill" id="phase">connecting…</span>
+  <span class="sub" id="who"></span>
+  <span class="spacer"></span>
+  <button class="ctl" id="btnPause">Pause</button>
+  <button class="ctl" id="btnResume">Resume</button>
+  <button class="ctl danger" id="btnStop">Stop</button>
+</header>
+<nav>
+  <a data-tab="overview" class="active">Overview</a>
+  <a data-tab="workers">Workers</a>
+  <a data-tab="failures">Failures</a>
+  <a data-tab="log">Log</a>
+  <a data-tab="settings">Status &amp; Settings</a>
+</nav>
+<main>
+  <div class="banner" id="banner"></div>
+
+  <!-- ============ OVERVIEW ============ -->
+  <section class="tab active" id="tab-overview">
+    <div class="tiles">
+      <div class="tile"><div class="k">Files discovered</div><div class="v" id="t-files">–</div><div class="d" id="t-folders"></div></div>
+      <div class="tile"><div class="k">Data discovered</div><div class="v" id="t-bytes">–</div><div class="d" id="t-quota"></div></div>
+      <div class="tile"><div class="k">Files done</div><div class="v" id="t-done">–</div><div class="d" id="t-donebytes"></div></div>
+      <div class="tile"><div class="k">Skipped</div><div class="v" id="t-skipped">–</div><div class="d" id="t-gone"></div></div>
+      <div class="tile"><div class="k">Failed</div><div class="v" id="t-failed">–</div><div class="d" id="t-retrywait"></div></div>
+      <div class="tile"><div class="k">Throughput (recent)</div><div class="v" id="t-bps">–</div><div class="d" id="t-bpsavg"></div></div>
+      <div class="tile"><div class="k">ETA</div><div class="v" id="t-eta">–</div><div class="d" id="t-pending"></div></div>
+      <div class="tile"><div class="k">Throttling</div><div class="v" id="t-429">–</div><div class="d" id="t-backoff"></div></div>
+    </div>
+
+    <div class="progress-wrap">
+      <div class="bar-label"><span>Overall progress (bytes)</span><span id="p-pct">0%</span></div>
+      <div class="bar-outer"><div class="bar-inner" id="p-bar"></div></div>
+      <div class="bar-label" style="margin-top:6px"><span id="p-detail"></span><span id="p-session"></span></div>
+    </div>
+
+    <div class="charts">
+      <div class="chart-card wide">
+        <h3>Throughput</h3><div class="sub">MB/s over time (this session)</div>
+        <canvas id="c-bps"></canvas>
+      </div>
+      <div class="chart-card">
+        <h3>Files completed</h3><div class="sub">cumulative</div>
+        <canvas id="c-done"></canvas>
+      </div>
+      <div class="chart-card">
+        <h3>Failures</h3><div class="sub">cumulative permanently-failed count</div>
+        <canvas id="c-fail"></canvas>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:16px">
+      <h3>Recent errors</h3>
+      <table><thead><tr><th style="width:160px">Time</th><th>File</th><th>Error</th></tr></thead>
+      <tbody id="err-rows"><tr><td colspan="3" class="mono">none</td></tr></tbody></table>
+    </div>
+  </section>
+
+  <!-- ============ WORKERS ============ -->
+  <section class="tab" id="tab-workers">
+    <div class="card">
+      <h3>Active workers</h3>
+      <table>
+        <thead><tr><th style="width:60px">#</th><th style="width:110px">State</th><th>Current file</th><th class="num">Progress</th><th style="width:160px"></th></tr></thead>
+        <tbody id="worker-rows"><tr><td colspan="5" class="mono">no workers</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ============ FAILURES ============ -->
+  <section class="tab" id="tab-failures">
+    <div class="card">
+      <h3>Failed &amp; retrying items <span class="sub" id="fail-count"></span></h3>
+      <table>
+        <thead><tr><th>File</th><th class="num">Size</th><th style="width:90px">Status</th><th class="num" style="width:70px">Tries</th><th style="width:170px">Next retry</th><th>Error</th></tr></thead>
+        <tbody id="fail-rows"><tr><td colspan="6" class="mono">none 🎉</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ============ LOG ============ -->
+  <section class="tab" id="tab-log">
+    <pre id="logbox">loading…</pre>
+  </section>
+
+  <!-- ============ SETTINGS ============ -->
+  <section class="tab" id="tab-settings">
+    <div class="card">
+      <h3>Run configuration</h3>
+      <table class="kv"><tbody id="cfg-rows"></tbody></table>
+    </div>
+    <div class="card">
+      <h3>Counters by manifest status</h3>
+      <table>
+        <thead><tr><th>Status</th><th class="num">Files</th><th class="num">Bytes</th></tr></thead>
+        <tbody id="bystatus-rows"></tbody>
+      </table>
+    </div>
+  </section>
+</main>
+<div id="tooltip"></div>
+<footer>OneDrive Export dashboard · localhost only · auto-refreshes every 2 s</footer>
+
+<script>
+"use strict";
+// ------------------------------------------------------------------ utilities
+const $ = id => document.getElementById(id);
+const fmtInt = n => (n == null ? "–" : Number(n).toLocaleString());
+function fmtBytes(n) {
+  if (n == null) return "–";
+  n = Number(n);
+  const u = ["B","KB","MB","GB","TB"];
+  let i = 0;
+  while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+  return n.toFixed(n >= 100 || i === 0 ? 0 : 1) + " " + u[i];
+}
+function fmtDur(sec) {
+  if (sec == null) return "–";
+  sec = Number(sec);
+  if (sec < 0) return "–";
+  const d = Math.floor(sec / 86400), h = Math.floor(sec % 86400 / 3600), m = Math.floor(sec % 3600 / 60);
+  if (d > 0) return d + "d " + h + "h";
+  if (h > 0) return h + "h " + m + "m";
+  return m + "m";
+}
+function fmtTime(iso) {
+  if (!iso) return "";
+  try { return new Date(iso).toLocaleTimeString(); } catch { return iso; }
+}
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+// ------------------------------------------------------------------ tabs
+document.querySelectorAll("nav a").forEach(a => {
+  a.addEventListener("click", () => {
+    document.querySelectorAll("nav a").forEach(x => x.classList.remove("active"));
+    document.querySelectorAll(".tab").forEach(x => x.classList.remove("active"));
+    a.classList.add("active");
+    $("tab-" + a.dataset.tab).classList.add("active");
+    if (a.dataset.tab === "log") refreshLog();
+    if (a.dataset.tab === "failures") refreshFailures();
+  });
+});
+
+// ------------------------------------------------------------------ controls
+async function sendControl(command) {
+  try {
+    await fetch("/api/control", { method: "POST", body: JSON.stringify({ command }) });
+  } catch (e) { console.error(e); }
+}
+$("btnPause").onclick  = () => sendControl("pause");
+$("btnResume").onclick = () => sendControl("resume");
+$("btnStop").onclick   = () => { if (confirm("Stop the export safely? Progress is saved and the run can be resumed later.")) sendControl("stop"); };
+
+// ------------------------------------------------------------------ charts (hand-rolled canvas line charts)
+// Single-series line charts: 2px line, hairline grid, crosshair + tooltip on hover.
+const css = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+function makeChart(canvasId, color, valueFmt) {
+  const cv = $(canvasId), tip = $("tooltip");
+  const state = { pts: [], hoverX: null };
+  function draw() {
+    const dpr = window.devicePixelRatio || 1;
+    const w = cv.clientWidth, h = cv.clientHeight;
+    if (cv.width !== w * dpr) { cv.width = w * dpr; cv.height = h * dpr; }
+    const ctx = cv.getContext("2d");
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+    const padL = 46, padR = 8, padT = 8, padB = 18;
+    const iw = w - padL - padR, ih = h - padT - padB;
+    const pts = state.pts;
+    ctx.font = "11px system-ui, sans-serif";
+    if (pts.length < 2) {
+      ctx.fillStyle = css("--muted");
+      ctx.fillText("collecting data…", padL, h / 2);
+      return;
+    }
+    const max = Math.max(...pts.map(p => p.v), 1e-9) * 1.1;
+    const x = i => padL + iw * i / (pts.length - 1);
+    const y = v => padT + ih * (1 - v / max);
+    // grid: 3 recessive horizontal hairlines + labels
+    ctx.strokeStyle = css("--grid"); ctx.lineWidth = 1;
+    ctx.fillStyle = css("--muted");
+    ctx.textAlign = "right"; ctx.textBaseline = "middle";
+    for (let g = 0; g <= 3; g++) {
+      const v = max * g / 3, gy = y(v);
+      ctx.beginPath(); ctx.moveTo(padL, gy); ctx.lineTo(w - padR, gy); ctx.stroke();
+      ctx.fillText(valueFmt(v), padL - 6, gy);
+    }
+    // baseline
+    ctx.strokeStyle = css("--baseline");
+    ctx.beginPath(); ctx.moveTo(padL, padT + ih); ctx.lineTo(w - padR, padT + ih); ctx.stroke();
+    // time labels: first + last
+    ctx.textAlign = "left"; ctx.textBaseline = "top";
+    ctx.fillText(fmtTime(pts[0].t), padL, padT + ih + 4);
+    ctx.textAlign = "right";
+    ctx.fillText(fmtTime(pts[pts.length - 1].t), w - padR, padT + ih + 4);
+    // series line (2px)
+    ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.lineJoin = "round";
+    ctx.beginPath();
+    pts.forEach((p, i) => { const px = x(i), py = y(p.v); if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py); });
+    ctx.stroke();
+    // hover crosshair + point marker
+    if (state.hoverX != null) {
+      const i = Math.round((state.hoverX - padL) / iw * (pts.length - 1));
+      if (i >= 0 && i < pts.length) {
+        const px = x(i), py = y(pts[i].v);
+        ctx.strokeStyle = css("--baseline");
+        ctx.beginPath(); ctx.moveTo(px, padT); ctx.lineTo(px, padT + ih); ctx.stroke();
+        ctx.fillStyle = color;
+        ctx.beginPath(); ctx.arc(px, py, 4, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = css("--surface"); ctx.lineWidth = 2; ctx.stroke();  // 2px surface ring
+      }
+    }
+  }
+  cv.addEventListener("mousemove", ev => {
+    const r = cv.getBoundingClientRect();
+    state.hoverX = ev.clientX - r.left;
+    const pts = state.pts;
+    if (pts.length > 1) {
+      const padL = 46, padR = 8, iw = cv.clientWidth - padL - padR;
+      const i = Math.max(0, Math.min(pts.length - 1, Math.round((state.hoverX - padL) / iw * (pts.length - 1))));
+      tip.style.display = "block";
+      tip.style.left = (ev.clientX + 14) + "px";
+      tip.style.top = (ev.clientY + 14) + "px";
+      tip.innerHTML = fmtTime(pts[i].t) + " · <b>" + valueFmt(pts[i].v) + "</b>";
+    }
+    draw();
+  });
+  cv.addEventListener("mouseleave", () => { state.hoverX = null; tip.style.display = "none"; draw(); });
+  return {
+    update(pts) { state.pts = pts; draw(); },
+    redraw: draw
+  };
+}
+const chartBps  = makeChart("c-bps",  css("--s-blue"), v => (v / 1048576).toFixed(1));
+const chartDone = makeChart("c-done", css("--s-aqua"), v => fmtInt(Math.round(v)));
+const chartFail = makeChart("c-fail", css("--s-red"),  v => fmtInt(Math.round(v)));
+window.addEventListener("resize", () => { chartBps.redraw(); chartDone.redraw(); chartFail.redraw(); });
+
+// ------------------------------------------------------------------ status polling
+let staleCount = 0;
+async function refreshStatus() {
+  let s;
+  try {
+    s = await (await fetch("/api/status")).json();
+    if (!s || !s.generatedAt) throw new Error("empty");
+  } catch {
+    staleCount++;
+    if (staleCount > 3) { $("phase").textContent = "no data"; $("phase").className = "phase-pill"; }
+    return;
+  }
+  staleCount = 0;
+
+  // banner: completion > staleness > pause reason
+  const ageSec = (Date.now() - new Date(s.generatedAt).getTime()) / 1000;
+  const banner = $("banner");
+  const isComplete = s.phase === "complete";
+  if (isComplete && ageSec < 120) {
+    banner.style.display = "block";
+    banner.className = "banner ok";
+    banner.textContent = "✔ Export run complete — final results below. The web server stays up until you confirm close at the console (or press Stop here).";
+  } else if (ageSec > 60) {
+    banner.style.display = "block";
+    banner.className = "banner";
+    banner.textContent = "⚠ Status is " + fmtDur(ageSec) + " old — the exporter process may have stopped. Last phase: " + s.phase;
+  } else if (s.pauseReason) {
+    banner.style.display = "block";
+    banner.className = "banner";
+    banner.textContent = "⏸ " + s.pauseReason;
+  } else {
+    banner.style.display = "none";
+  }
+
+  // header
+  const phase = $("phase");
+  if (isComplete) { phase.textContent = "✔ complete"; phase.className = "phase-pill complete"; }
+  else if (s.paused) { phase.textContent = "paused"; phase.className = "phase-pill paused"; }
+  else { phase.textContent = s.phase; phase.className = "phase-pill running"; }
+  $("who").textContent = (s.config ? s.config.upn + " → " + s.config.destination : "");
+
+  const t = s.totals || {};
+  $("t-files").textContent = fmtInt(t.files);
+  $("t-folders").textContent = fmtInt(t.folders) + " folders";
+  $("t-bytes").textContent = fmtBytes(t.bytes);
+  const quota = s.discovery && s.discovery.quotaUsedBytes;
+  $("t-quota").textContent = quota ? "quota used: " + fmtBytes(quota) : "";
+  $("t-done").textContent = fmtInt(t.doneFiles);
+  $("t-donebytes").textContent = fmtBytes(t.doneBytes);
+  $("t-skipped").textContent = fmtInt(t.skippedFiles);
+  $("t-gone").textContent = fmtInt(t.goneFiles) + " gone from source";
+  $("t-failed").textContent = fmtInt(t.failedFiles);
+  $("t-failed").className = t.failedFiles > 0 ? "v bad" : "v";
+  const rw = (s.byStatus && s.byStatus.retry_wait) ? s.byStatus.retry_wait.count : 0;
+  $("t-retrywait").textContent = fmtInt(rw) + " in retry-wait";
+
+  const sess = s.session || {};
+  $("t-bps").textContent = fmtBytes(sess.bpsRecent) + "/s";
+  $("t-bpsavg").textContent = "avg " + fmtBytes(sess.bpsAverage) + "/s · session " + fmtBytes(sess.bytesDownloaded);
+  $("t-eta").textContent = fmtDur(sess.etaSeconds);
+  $("t-pending").textContent = fmtInt(t.pendingFiles) + " files / " + fmtBytes(t.pendingBytes) + " left";
+  const th = s.throttling || {};
+  $("t-429").textContent = fmtInt(th.http429);
+  $("t-backoff").textContent = (th.backoffRemaining > 0 ? "backing off " + th.backoffRemaining + "s · " : "") + fmtInt(th.http5xx) + " transient 5xx";
+
+  // progress bar
+  const pct = t.bytes > 0 ? 100 * t.doneBytes / t.bytes : 0;
+  $("p-pct").textContent = pct.toFixed(1) + "%";
+  $("p-bar").style.width = Math.min(100, pct) + "%";
+  $("p-detail").textContent = fmtBytes(t.doneBytes) + " of " + fmtBytes(t.bytes);
+  $("p-session").textContent = "this session: " + fmtInt(sess.filesDownloaded) + " files, " + fmtInt(sess.filesSkippedHave) + " kept existing";
+
+  // charts
+  const hist = s.history || [];
+  chartBps.update(hist.map(p => ({ t: p.t, v: Number(p.bps) })));
+  chartDone.update(hist.map(p => ({ t: p.t, v: Number(p.done) })));
+  chartFail.update(hist.map(p => ({ t: p.t, v: Number(p.fail) })));
+
+  // recent errors
+  const errs = s.recentErrors || [];
+  $("err-rows").innerHTML = errs.length
+    ? errs.slice(0, 15).map(e =>
+        "<tr><td class='mono'>" + fmtTime(e.ts) + "</td><td class='mono'>" + esc(e.file) + "</td><td class='mono'>" + esc(e.error) + "</td></tr>").join("")
+    : "<tr><td colspan='3' class='mono'>none</td></tr>";
+
+  // workers
+  const ws = s.workers || [];
+  $("worker-rows").innerHTML = ws.length
+    ? ws.map(w => {
+        const p = (w.total > 0 && w.bytes != null) ? Math.min(100, 100 * w.bytes / w.total) : 0;
+        const prog = w.state === "downloading" ? fmtBytes(w.bytes) + " / " + fmtBytes(w.total) : "";
+        const bar = w.state === "downloading" ? "<div class='worker-bar'><i style='width:" + p + "%'></i></div>" : "";
+        return "<tr><td>" + w.id + "</td><td><span class='status-chip'>" + esc(w.state) + "</span></td>" +
+               "<td class='mono'>" + esc(w.file || "") + "</td><td class='num'>" + prog + "</td><td>" + bar + "</td></tr>";
+      }).join("")
+    : "<tr><td colspan='5' class='mono'>no workers</td></tr>";
+
+  // settings tab
+  const cfg = s.config || {};
+  $("cfg-rows").innerHTML =
+    "<tr><td>User</td><td>" + esc(cfg.upn) + "</td></tr>" +
+    "<tr><td>Destination</td><td class='mono'>" + esc(cfg.destination) + "</td></tr>" +
+    "<tr><td>Auth mode</td><td>" + esc(cfg.authMode) + "</td></tr>" +
+    "<tr><td>Concurrency</td><td>" + esc(cfg.concurrency) + "</td></tr>" +
+    "<tr><td>Verify mode</td><td>" + esc(cfg.verifyMode) + "</td></tr>" +
+    "<tr><td>Phase</td><td>" + esc(s.phase) + (s.paused ? " (paused)" : "") + "</td></tr>" +
+    "<tr><td>Session started</td><td>" + esc(sess.startedAt ? new Date(sess.startedAt).toLocaleString() : "") + "</td></tr>" +
+    "<tr><td>Status generated</td><td>" + esc(new Date(s.generatedAt).toLocaleString()) + "</td></tr>";
+  const by = s.byStatus || {};
+  $("bystatus-rows").innerHTML = Object.keys(by).sort().map(k =>
+    "<tr><td>" + esc(k) + "</td><td class='num'>" + fmtInt(by[k].count) + "</td><td class='num'>" + fmtBytes(by[k].bytes) + "</td></tr>").join("") ||
+    "<tr><td colspan='3' class='mono'>no data yet</td></tr>";
+}
+
+// ------------------------------------------------------------------ failures & log
+async function refreshFailures() {
+  try {
+    const f = await (await fetch("/api/failures")).json();
+    const rows = f.failures || [];
+    $("fail-count").textContent = rows.length ? "(" + rows.length + (rows.length >= 1000 ? "+, first 1000 shown" : "") + ")" : "";
+    $("fail-rows").innerHTML = rows.length
+      ? rows.map(r =>
+          "<tr><td class='mono'>" + esc(r.relPath) + "</td><td class='num'>" + fmtBytes(r.size) + "</td>" +
+          "<td><span class='status-chip " + (r.status === "failed" ? "err" : "wait") + "'>" + esc(r.status) + "</span></td>" +
+          "<td class='num'>" + fmtInt(r.attempts) + "</td>" +
+          "<td class='mono'>" + (r.nextRetry ? esc(new Date(r.nextRetry).toLocaleString()) : "–") + "</td>" +
+          "<td class='mono'>" + esc(r.error) + "</td></tr>").join("")
+      : "<tr><td colspan='6' class='mono'>none 🎉</td></tr>";
+  } catch { /* keep last render */ }
+}
+async function refreshLog() {
+  try {
+    const text = await (await fetch("/api/log?lines=300")).text();
+    const box = $("logbox");
+    const atBottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 40;
+    box.textContent = text;
+    if (atBottom) box.scrollTop = box.scrollHeight;
+  } catch { }
+}
+
+// ------------------------------------------------------------------ timers
+refreshStatus();
+setInterval(refreshStatus, 2000);
+setInterval(() => {
+  if ($("tab-failures").classList.contains("active")) refreshFailures();
+  if ($("tab-log").classList.contains("active")) refreshLog();
+}, 5000);
+</script>
+</body>
+</html>

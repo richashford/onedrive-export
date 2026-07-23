@@ -1,0 +1,13 @@
+# local secrets & runtime state
+config.json
+state/
+logs/
+*.cer
+*.pfx
+failures-*.csv
+
+# test-run artifacts (the test scripts recreate these)
+test/state/
+test/dest/
+test/logs/
+test/logs-unit/

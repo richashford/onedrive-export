@@ -1,0 +1,37 @@
+{
+  "tenantId": "00000000-0000-0000-0000-000000000000",
+  "clientId": "00000000-0000-0000-0000-000000000000",
+  "userPrincipalName": "target.user@yourtenant.com",
+
+  "authMode": "DeviceCode",
+  "certificateThumbprint": "",
+  "certificatePfxPath": "",
+
+  "destinationRoot": "R:\\OneDriveExport",
+
+  "concurrency": 4,
+  "maxRetries": 8,
+  "downloadBufferMB": 1,
+  "readStallTimeoutSec": 180,
+
+  "verifyMode": "size",
+  "hashSpotCheckPercent": 0,
+  "timestampToleranceSec": 5,
+
+  "include": [],
+  "exclude": [],
+
+  "dashboardPort": 8787,
+  "statusIntervalSeconds": 5,
+
+  "diskMinFreeGB": 20,
+
+  "notifyWebhookUrl": "",
+  "notifyFailureThreshold": 200,
+
+  "paths": {
+    "database": "state\\export.db",
+    "logDir": "logs",
+    "stateDir": "state"
+  }
+}
