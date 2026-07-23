@@ -170,7 +170,10 @@ function Start-DownloadWorker {
     $wid = $WorkerId
     $workQueue = $WorkQueue
     $resultQueue = $ResultQueue
-    return Start-ThreadJob -Name "odx-worker-$wid" -ScriptBlock $WorkerScript -ArgumentList @($Shared, $workQueue, $resultQueue, $wid, $SrcDir, $WorkerCfg)
+    # -ThrottleLimit: Start-ThreadJob's default pool limit is 5 concurrent jobs
+    # per session - with the dashboard job that silently capped worker pools at
+    # 4 regardless of configured concurrency. Raise it well past max concurrency.
+    return Start-ThreadJob -Name "odx-worker-$wid" -ThrottleLimit 32 -ScriptBlock $WorkerScript -ArgumentList @($Shared, $workQueue, $resultQueue, $wid, $SrcDir, $WorkerCfg)
 }
 
 function Test-AllWorkersIdle {

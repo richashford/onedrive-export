@@ -14,7 +14,7 @@ function Start-DashboardJob {
         [Parameter(Mandatory)][hashtable]$Shared
     )
 
-    $job = Start-ThreadJob -Name 'odx-dashboard' -ArgumentList @($Port, $WebRoot, $StatusDir, $LogDir, $ControlFile, $Shared) -ScriptBlock {
+    $job = Start-ThreadJob -Name 'odx-dashboard' -ThrottleLimit 32 -ArgumentList @($Port, $WebRoot, $StatusDir, $LogDir, $ControlFile, $Shared) -ScriptBlock {
         param($Port, $WebRoot, $StatusDir, $LogDir, $ControlFile, $Shared)
 
         function Send-Bytes {

@@ -263,6 +263,11 @@ README's schtasks example includes it).
    ~850k-row queued pool, so due retries were never selected until the queue
    drained. Fix: query due `retry_wait` rows first, then top up with `queued`.
    Unit-tested (due retry beats queued backlog at LIMIT 1).
+9. **Start-ThreadJob's default ThrottleLimit of 5** silently capped the worker
+   pool: dashboard job + workers 1-4 filled the five slots, so with
+   `concurrency: 6` workers 5-6 sat `NotStarted` forever (observed live after
+   bumping concurrency). Fix: `-ThrottleLimit 32` on every `Start-ThreadJob`
+   call. Integration-tested with an 8-worker pool asserting all 8 register.
 
 ## Testing
 

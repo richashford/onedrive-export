@@ -87,6 +87,7 @@ Assert ($true) "download phase completed cleanly in $([int]$sw.Elapsed.TotalSeco
 Assert ($sw.Elapsed.TotalSeconds -lt 60) 'no hang on empty queue'
 $leftover = @(Get-Job -Name 'odx-worker-*' -ErrorAction SilentlyContinue)
 Assert ($leftover.Count -eq 0) 'worker jobs cleaned up' "leftover=$($leftover.Count)"
+Assert ($Shared.Workers.Keys.Count -eq 2) 'all configured workers ran' "registered=$($Shared.Workers.Keys.Count)"
 Assert ($Shared.Stop -eq $false) 'global Stop untouched by pool shutdown (dashboard survives phase end)' "Stop=$($Shared.Stop)"
 Assert ($Shared.PoolStop -eq $true) 'pool shutdown used PoolStop'
 
@@ -130,6 +131,19 @@ $Shared.Stop = $true
 Wait-Job -Job $job -Timeout 10 | Out-Null
 Remove-Job -Job $job -Force -ErrorAction SilentlyContinue
 Assert ($true) 'dashboard shut down'
+
+# ---------- 4b) wide worker pool (regression: Start-ThreadJob ThrottleLimit=5 default) ----------
+# With the default thread-job pool limit of 5, an 8-worker pool silently ran
+# only 5 workers (4 with the dashboard job holding a slot). Every configured
+# worker must actually start and register itself.
+Write-Host "`n--- Wide worker pool (8 workers) ---"
+$Shared = New-SharedState
+$cfg8 = $cfg.PSObject.Copy()
+$cfg8.concurrency = 8
+Invoke-DownloadPhase -Config $cfg8 -Conn $conn -Shared $Shared -SrcDir (Join-Path $root 'src') -RefreshToken $refreshStub
+Assert ($Shared.Workers.Keys.Count -eq 8) 'all 8 workers started and registered' "registered=$($Shared.Workers.Keys.Count)"
+$leftover8 = @(Get-Job -Name 'odx-worker-*' -ErrorAction SilentlyContinue)
+Assert ($leftover8.Count -eq 0) 'wide pool cleaned up' "leftover=$($leftover8.Count)"
 
 # ---------- 5) snapshot thread-safety hammer (regression: live crash 2026-07-23) ----------
 # Enumerating a synchronized hashtable while workers mutate it invalidates the
