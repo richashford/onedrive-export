@@ -191,12 +191,24 @@ LIMIT 1000
 
 function Write-JsonAtomic {
     # Write to temp then rename, so the dashboard never reads a half-written file.
+    # The rename can transiently fail if a reader holds the destination open
+    # without delete-sharing; snapshots are best-effort telemetry, so retry
+    # briefly and then SKIP the cycle - never let a snapshot kill a run.
     param($Object, [string]$Path, [int]$Depth = 6)
     $tmp = "$Path.tmp"
     $json = $Object | ConvertTo-Json -Depth $Depth -Compress
     # BOM-less UTF-8: a BOM breaks strict JSON parsers reading the API
     [System.IO.File]::WriteAllText($tmp, $json, [System.Text.UTF8Encoding]::new($false))
-    [System.IO.File]::Move($tmp, $Path, $true)
+    for ($i = 0; $i -lt 5; $i++) {
+        try {
+            [System.IO.File]::Move($tmp, $Path, $true)
+            return
+        } catch {
+            Start-Sleep -Milliseconds (50 * ($i + 1))
+        }
+    }
+    try { Write-Log -Level WARN -Message "Snapshot update skipped - $([System.IO.Path]::GetFileName($Path)) was busy" } catch { }
+    try { [System.IO.File]::Delete($tmp) } catch { }
 }
 
 Export-ModuleMember -Function Write-StatusSnapshot, Write-FailuresSnapshot, Write-JsonAtomic, Get-SyncSnapshot

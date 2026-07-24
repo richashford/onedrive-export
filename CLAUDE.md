@@ -268,6 +268,14 @@ README's schtasks example includes it).
    `concurrency: 6` workers 5-6 sat `NotStarted` forever (observed live after
    bumping concurrency). Fix: `-ThrottleLimit 32` on every `Start-ThreadJob`
    call. Integration-tested with an 8-worker pool asserting all 8 register.
+10. **status.json rename vs. concurrent reader** (killed the run once, live,
+    2026-07-24 00:51; watchdog auto-recovered in 61s): `File.Move(tmp, dest,
+    overwrite)` fails with access-denied while any reader holds dest open
+    without `FileShare.Delete`. Fix on both sides: `Write-JsonAtomic` retries
+    5x then SKIPS the cycle (snapshots are telemetry — never fatal), and the
+    dashboard reader opens with `ReadWrite|Delete` sharing so renames never
+    collide with it. Integration-tested against a hostile non-delete-sharing
+    reader.
 
 ## Testing
 

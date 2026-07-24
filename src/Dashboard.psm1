@@ -39,9 +39,20 @@ function Start-DashboardJob {
             param($Context, [string]$Path)
             if (Test-Path -LiteralPath $Path) {
                 $bytes = $null
-                # Retry briefly: the writer may be mid-rename.
+                # Open with Delete sharing so the writer's atomic rename can
+                # replace the file even while we hold it open; retry briefly in
+                # case the writer is mid-rename.
                 for ($i = 0; $i -lt 3; $i++) {
-                    try { $bytes = [System.IO.File]::ReadAllBytes($Path); break } catch { Start-Sleep -Milliseconds 50 }
+                    try {
+                        $fs = [System.IO.File]::Open($Path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read,
+                            ([System.IO.FileShare]::ReadWrite -bor [System.IO.FileShare]::Delete))
+                        try {
+                            $ms = [System.IO.MemoryStream]::new()
+                            $fs.CopyTo($ms)
+                            $bytes = $ms.ToArray()
+                        } finally { $fs.Dispose() }
+                        break
+                    } catch { Start-Sleep -Milliseconds 50 }
                 }
                 if ($bytes) { Send-Bytes -Context $Context -Bytes $bytes -ContentType 'application/json; charset=utf-8'; return }
             }

@@ -145,6 +145,22 @@ Assert ($Shared.Workers.Keys.Count -eq 8) 'all 8 workers started and registered'
 $leftover8 = @(Get-Job -Name 'odx-worker-*' -ErrorAction SilentlyContinue)
 Assert ($leftover8.Count -eq 0) 'wide pool cleaned up' "leftover=$($leftover8.Count)"
 
+# ---------- 4c) snapshot write vs. locked reader (regression: live crash 2026-07-24) ----------
+# A reader holding status.json open WITHOUT delete-sharing (as any naive client
+# might) must not be able to crash a snapshot write - the writer retries then
+# skips the cycle.
+Write-Host "`n--- Snapshot write vs locked reader ---"
+$Shared = New-SharedState
+$statusPath = Join-Path $cfg.statusDir 'status.json'
+Write-StatusSnapshot -Conn $conn -Shared $Shared -Config $cfg   # ensure it exists
+$hostileReader = [System.IO.File]::Open($statusPath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read)
+$lockErr = $null
+try { Write-StatusSnapshot -Conn $conn -Shared $Shared -Config $cfg } catch { $lockErr = $_.Exception.Message }
+$hostileReader.Dispose()
+Assert ($null -eq $lockErr) 'snapshot write survives locked reader' $lockErr
+Write-StatusSnapshot -Conn $conn -Shared $Shared -Config $cfg   # and works again once released
+Assert (Test-Path $statusPath) 'snapshot resumes after reader releases'
+
 # ---------- 5) snapshot thread-safety hammer (regression: live crash 2026-07-23) ----------
 # Enumerating a synchronized hashtable while workers mutate it invalidates the
 # enumerator. Three writer threads hammer WorkerBytes/Workers while snapshots
